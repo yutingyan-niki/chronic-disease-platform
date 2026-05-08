@@ -137,6 +137,7 @@ if menu == "数据浏览":
         st.info(f"暂无数据或加载失败：{e}")
 
 # ==================== 档案管理模块 ====================
+# ==================== 档案管理模块 ====================
 elif menu == "档案管理":
     st.subheader("📝 健康档案管理")
     
@@ -155,9 +156,9 @@ elif menu == "档案管理":
     st.dataframe(df_all, use_container_width=True)
     st.caption(f"筛选结果：共 {len(df_all)} 条记录")
     
-    tab1, tab2, tab3, tab4 = st.tabs(["新增档案", "修改档案", "删除档案", "批量导入Excel/CSV"])
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["新增档案", "修改档案", "删除档案", "批量导入居民", "批量导入医院数据", "批量导入设备数据"])
     
-    # 新增档案
+    # ========= 1. 新增档案 =========
     with tab1:
         with st.form("add_form"):
             col1, col2 = st.columns(2)
@@ -194,7 +195,7 @@ elif menu == "档案管理":
                     except Exception as e:
                         st.error(f"新增失败：{e}")
     
-    # 修改档案
+    # ========= 2. 修改档案 =========
     with tab2:
         st.subheader("修改居民信息")
         search_id = st.text_input("输入要修改的居民身份证号", key="search_id")
@@ -247,7 +248,7 @@ elif menu == "档案管理":
                     except Exception as e:
                         st.error(f"修改失败：{e}")
     
-    # 删除档案
+    # ========= 3. 删除档案 =========
     with tab3:
         st.subheader("删除居民信息")
         st.warning("删除操作不可恢复，会同时删除该居民的所有医院记录和设备数据！")
@@ -269,12 +270,12 @@ elif menu == "档案管理":
             else:
                 st.warning("请输入身份证号")
     
-    # 批量导入
+    # ========= 4. 批量导入居民 =========
     with tab4:
         st.subheader("批量导入居民档案")
         st.caption("支持 Excel (.xlsx) 或 CSV 文件，必须包含 name, id_card 列")
         
-        uploaded_file = st.file_uploader("上传文件", type=["xlsx", "csv"])
+        uploaded_file = st.file_uploader("上传居民数据文件", type=["xlsx", "csv"], key="resident_upload")
         if uploaded_file is not None:
             try:
                 if uploaded_file.name.endswith(".csv"):
@@ -311,7 +312,82 @@ elif menu == "档案管理":
                     st.success(f"导入成功！共 {len(df_import)} 条")
             except Exception as e:
                 st.error(f"导入失败：{e}")
-
+    
+    # ========= 5. 批量导入医院数据 =========
+    with tab5:
+        st.subheader("🏥 批量导入医院诊疗记录")
+        st.caption("支持 Excel (.xlsx) 或 CSV 文件，必须包含 id_card 列")
+        
+        uploaded_file_hos = st.file_uploader("上传医院数据文件", type=["xlsx", "csv"], key="hos_upload")
+        if uploaded_file_hos is not None:
+            try:
+                if uploaded_file_hos.name.endswith(".csv"):
+                    df_import = pd.read_csv(uploaded_file_hos, encoding="utf-8")
+                else:
+                    df_import = pd.read_excel(uploaded_file_hos)
+                
+                if "id_card" not in df_import.columns:
+                    st.error("文件必须包含 id_card 列")
+                else:
+                    # 补充缺失字段默认值
+                    for col in ["disease", "blood_pressure", "blood_sugar", "visit_date", "hospital_name", "doctor_advice"]:
+                        if col not in df_import.columns:
+                            df_import[col] = None
+                    
+                    df_import = df_import.drop_duplicates(subset=["id_card", "visit_date"], keep="first")
+                    
+                    cursor = conn.cursor()
+                    for _, row in df_import.iterrows():
+                        try:
+                            cursor.execute('''
+                                INSERT INTO hospital_records (id_card, disease, blood_pressure, blood_sugar, visit_date, hospital_name, doctor_advice)
+                                VALUES (?, ?, ?, ?, ?, ?, ?)
+                            ''', (row.get("id_card"), row.get("disease"), row.get("blood_pressure"), row.get("blood_sugar"), row.get("visit_date"), row.get("hospital_name"), row.get("doctor_advice")))
+                        except:
+                            pass
+                    conn.commit()
+                    st.success(f"✅ 导入成功！共 {len(df_import)} 条医院记录")
+                    st.dataframe(df_import.head(10), use_container_width=True)
+            except Exception as e:
+                st.error(f"导入失败：{e}")
+    
+    # ========= 6. 批量导入设备数据 =========
+    with tab6:
+        st.subheader("📊 批量导入智能设备监测数据")
+        st.caption("支持 Excel (.xlsx) 或 CSV 文件，必须包含 id_card 列")
+        
+        uploaded_file_dev = st.file_uploader("上传设备数据文件", type=["xlsx", "csv"], key="dev_upload")
+        if uploaded_file_dev is not None:
+            try:
+                if uploaded_file_dev.name.endswith(".csv"):
+                    df_import = pd.read_csv(uploaded_file_dev, encoding="utf-8")
+                else:
+                    df_import = pd.read_excel(uploaded_file_dev)
+                
+                if "id_card" not in df_import.columns:
+                    st.error("文件必须包含 id_card 列")
+                else:
+                    # 补充缺失字段默认值
+                    for col in ["systolic", "diastolic", "heart_rate", "blood_sugar", "measure_date", "measure_time"]:
+                        if col not in df_import.columns:
+                            df_import[col] = None
+                    
+                    df_import = df_import.drop_duplicates(subset=["id_card", "measure_date", "measure_time"], keep="first")
+                    
+                    cursor = conn.cursor()
+                    for _, row in df_import.iterrows():
+                        try:
+                            cursor.execute('''
+                                INSERT INTO device_data (id_card, systolic, diastolic, heart_rate, blood_sugar, measure_date, measure_time)
+                                VALUES (?, ?, ?, ?, ?, ?, ?)
+                            ''', (row.get("id_card"), row.get("systolic"), row.get("diastolic"), row.get("heart_rate"), row.get("blood_sugar"), row.get("measure_date"), row.get("measure_time")))
+                        except:
+                            pass
+                    conn.commit()
+                    st.success(f"✅ 导入成功！共 {len(df_import)} 条设备记录")
+                    st.dataframe(df_import.head(10), use_container_width=True)
+            except Exception as e:
+                st.error(f"导入失败：{e}")
 # ==================== 关联查询模块 ====================
 elif menu == "关联查询":
     st.subheader("🔗 多源数据关联查询")
